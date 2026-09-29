@@ -33,3 +33,56 @@ def test_create_and_update_order(client):
 
 def test_missing_order(client):
     assert client.get("/api/orders/missing").status_code == 404
+
+
+@pytest.mark.parametrize("order_id,status_code", [("standard-1001", 200), ("missing", 404)])
+def test_lookup_telemetry(client, monkeypatch, order_id, status_code):
+    from unittest.mock import Mock
+
+    telemetry = main.app.state.lookup_telemetry
+    requests = Mock()
+    logger = Mock()
+    monkeypatch.setattr(telemetry, "requests", requests)
+    monkeypatch.setattr(telemetry, "logger", logger)
+    spans = []
+    monkeypatch.setattr(telemetry.traces._active_span_processor, "on_end", spans.append)
+
+    response = client.get(f"/api/orders/{order_id}")
+    assert response.status_code == status_code
+    attributes = {
+        "http.route": "/api/orders/{order_id}",
+        "http.request.method": "GET",
+        "http.response.status_code": status_code,
+    }
+    requests.add.assert_called_once_with(1, attributes)
+    assert logger.emit.call_args.kwargs["attributes"] == {**attributes, "order.id": order_id}
+    assert len(spans) == 1
+    assert dict(spans[0].attributes) == attributes
+
+
+def test_lookup_failure_telemetry(client, monkeypatch):
+    from unittest.mock import Mock
+
+    telemetry = main.app.state.lookup_telemetry
+    requests = Mock()
+    monkeypatch.setattr(telemetry, "requests", requests)
+
+    def fail(_row):
+        raise ValueError("lookup failure")
+
+    monkeypatch.setattr(main, "order_detail", fail)
+    with pytest.raises(ValueError, match="lookup failure"):
+        client.get("/api/orders/standard-1001")
+    assert requests.add.call_args.args[1]["http.response.status_code"] == 500
+
+
+def test_other_routes_do_not_count_as_lookups(client, monkeypatch):
+    from unittest.mock import Mock
+
+    requests = Mock()
+    monkeypatch.setattr(main.app.state.lookup_telemetry, "requests", requests)
+    client.get("/healthz")
+    client.get("/api/orders")
+    response = client.post("/api/orders", json={"customer": "Taylor", "item": "Mug"})
+    client.patch(f"/api/orders/{response.json()['id']}", json={"status": "shipped"})
+    requests.add.assert_not_called()
