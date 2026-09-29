@@ -76,13 +76,56 @@ def test_sanitized_metadata_and_telemetry(monkeypatch):
             {"key": "http.route", "value": {"stringValue": context.ROUTE}},
             {"key": "http.response.status_code", "value": {"intValue": "500"}},
             {"key": "authorization", "value": {"stringValue": secret}}],
-            "events": [{"name": secret}], "status": {"message": secret}}]}]}]}
+            "events": [{"name": "exception", "attributes": [
+                {"key": "exception.type", "value": {"stringValue": "builtins.ValueError"}},
+                {"key": "exception.message", "value": {"stringValue": "day is out of range for month"}},
+                {"key": "exception.stacktrace", "value": {"stringValue": secret}},
+                {"key": "authorization", "value": {"stringValue": secret}},
+            ]}], "status": {"message": secret}}]}]}]}
     monkeypatch.setattr(context, "fetch", fetch)
     data = context.collect_context(parsed)
     assert secret not in json.dumps(data)
     assert data["metrics"] == [{"status_code": 500, "increase_5m": 2}]
     assert data["logs"][0]["trace_id"] == trace_id
     assert data["traces"][0]["spans"][0]["http_response_status_code"] == 500
+    assert data["traces"][0]["spans"][0]["exceptions"] == [
+        {"type": "ValueError", "message": "day is out of range for month"}]
+    assert data["source"]["file"] == "app/main.py"
+    assert data["source"]["imports"]
+    assert {item["name"] for item in data["source"]["functions"]} == {
+        "as_dict", "order_detail", "get_order"}
+
+
+def test_exception_message_allowlist_and_escaped_flag():
+    assert context.safe_exception({
+        "exception.type": "builtins.ValueError",
+        "exception.message": "customer private order contents",
+        "exception.escaped": "True",
+        "exception.stacktrace": "secret-token",
+    }) == {"type": "ValueError", "escaped": True}
+
+
+def test_source_context_reads_only_selected_functions(tmp_path, monkeypatch):
+    source_root = tmp_path / "source"
+    app_dir = source_root / "app"
+    app_dir.mkdir(parents=True)
+    source = app_dir / "main.py"
+    source.write_text(
+        "def order_detail(row):\n    return row['status']\n\n"
+        "def get_order(order_id):\n    return order_detail(order_id)\n\n"
+        "def as_dict(row):\n    return row\n\n"
+        "def seed_customer_data():\n    return 'private-customer-secret'\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(context, "APP_ROOT", source_root)
+    monkeypatch.setattr(context, "MAIN_SOURCE", source)
+    selected = context.source_context()
+    serialized = json.dumps(selected)
+    assert {item["name"] for item in selected["functions"]} == {
+        "as_dict", "order_detail", "get_order"}
+    assert selected["imports"] == []
+    assert "seed_customer_data" not in serialized
+    assert "private-customer-secret" not in serialized
 
 
 def test_unavailable_telemetry_does_not_leak_errors(monkeypatch):

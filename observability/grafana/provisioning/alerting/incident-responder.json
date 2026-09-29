@@ -1,0 +1,57 @@
+{
+  "apiVersion": 1,
+  "contactPoints": [
+    {
+      "orgId": 1,
+      "name": "local-incident-responder",
+      "receivers": [
+        {
+          "uid": "local-incident-webhook",
+          "type": "webhook",
+          "disableResolveMessage": false,
+          "settings": {
+            "url": "http://host.docker.internal:8001/alerts",
+            "httpMethod": "POST",
+            "maxAlerts": "20"
+          }
+        }
+      ]
+    }
+  ],
+  "policies": [
+    {
+      "orgId": 1,
+      "receiver": "grafana-default-email",
+      "group_by": [
+        "grafana_folder",
+        "alertname"
+      ],
+      "routes": [
+        {
+          "receiver": "local-incident-responder",
+          "object_matchers": [
+            [
+              "alertname",
+              "=",
+              "Order lookup HTTP 5xx"
+            ],
+            [
+              "service",
+              "=",
+              "order-tracker"
+            ],
+            [
+              "grafana_folder",
+              "=",
+              "Order Tracker"
+            ]
+          ],
+          "group_wait": "10s",
+          "group_interval": "30s",
+          "repeat_interval": "4h",
+          "continue": false
+        }
+      ]
+    }
+  ]
+}

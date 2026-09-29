@@ -1,13 +1,28 @@
 """Strict allowlists: raw webhook fields, log bodies and exception text never persist."""
+import ast
 import json
 import math
 import re
 import time
 from datetime import datetime
+from pathlib import Path
 from urllib.parse import urlencode
 from urllib.request import ProxyHandler, build_opener
 
 ROUTE = "/api/orders/{order_id}"
+APP_ROOT = Path(__file__).resolve().parents[1]
+MAIN_SOURCE = APP_ROOT / "app" / "main.py"
+SOURCE_FUNCTIONS = {"as_dict", "order_detail", "get_order"}
+SOURCE_DATETIME_IMPORTS = {"datetime", "timedelta", "timezone"}
+SAFE_EXCEPTION_TYPES = {
+    "ValueError", "OverflowError", "TypeError", "IndexError", "KeyError",
+    "AttributeError", "ZeroDivisionError", "OperationalError", "IntegrityError",
+}
+SAFE_EXCEPTION_MESSAGES = {
+    "day is out of range for month",
+    "month must be in 1..12",
+    "year out of range",
+}
 TEST_SUMMARY = "Test notification; no incident to fix"
 SAFE_VALUES = {
     "alertname": {"ResponderTest", "Order lookup HTTP 5xx"},
@@ -85,6 +100,50 @@ def safe_metadata(fields):
     return result
 
 
+def safe_exception(fields):
+    result = {}
+    exception_type = fields.get("exception.type")
+    if isinstance(exception_type, str):
+        exception_type = exception_type.rsplit(".", 1)[-1]
+        if exception_type in SAFE_EXCEPTION_TYPES:
+            result["type"] = exception_type
+    message = fields.get("exception.message")
+    if isinstance(message, str) and message in SAFE_EXCEPTION_MESSAGES:
+        result["message"] = message
+    escaped = fields.get("exception.escaped")
+    if isinstance(escaped, bool):
+        result["escaped"] = escaped
+    elif escaped in {"True", "False"}:
+        result["escaped"] = escaped == "True"
+    return result
+
+
+def source_context():
+    """Read only three named lookup helpers from the single approved source file."""
+    try:
+        source_path = MAIN_SOURCE.resolve(strict=True)
+        expected_path = (APP_ROOT / "app" / "main.py").resolve(strict=True)
+        if source_path != expected_path or source_path.name != "main.py":
+            return {"unavailable": True}
+        source = source_path.read_text(encoding="utf-8")
+        tree = ast.parse(source, filename="app/main.py")
+        snippets = []
+        imports = []
+        for node in tree.body:
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name in SOURCE_FUNCTIONS:
+                snippet = ast.get_source_segment(source, node)
+                if snippet and len(snippet) <= 5000:
+                    snippets.append({"name": node.name, "line": node.lineno, "source": snippet})
+            elif isinstance(node, ast.ImportFrom) and node.module == "datetime":
+                names = {item.name for item in node.names}
+                snippet = ast.get_source_segment(source, node)
+                if names <= SOURCE_DATETIME_IMPORTS and "datetime" in names and snippet and len(snippet) <= 200:
+                    imports.append({"line": node.lineno, "source": snippet})
+        return {"file": "app/main.py", "imports": imports[:1], "functions": snippets[:3]}
+    except Exception:
+        return {"unavailable": True}
+
+
 def collect_context(alerts):
     context = {"alerts": alerts, "window_seconds": 300, "captured_at_unix": int(time.time())}
     if all(alert["synthetic_test"] for alert in alerts):
@@ -92,6 +151,7 @@ def collect_context(alerts):
         context["telemetry"] = "Not queried: test notification, no incident to investigate."
         return context
     context["route"] = ROUTE
+    context["source"] = source_context()
     now = int(time.time())
     selector = 'order_lookup_requests_total{service_name="order-tracker",http_route="/api/orders/{order_id}"}'
     try:
@@ -133,7 +193,19 @@ def collect_context(alerts):
                         attrs = {a["key"].replace(".", "_"): next(iter(a.get("value", {}).values()), None)
                                  for a in span.get("attributes", []) if "key" in a}
                         if attrs.get("http_route") == ROUTE:
-                            spans.append(safe_metadata(attrs))
+                            span_context = safe_metadata(attrs)
+                            exceptions = []
+                            for event in span.get("events", [])[:10]:
+                                if event.get("name") != "exception":
+                                    continue
+                                event_attrs = {a.get("key"): next(iter(a.get("value", {}).values()), None)
+                                               for a in event.get("attributes", []) if isinstance(a, dict)}
+                                safe = safe_exception(event_attrs)
+                                if safe:
+                                    exceptions.append(safe)
+                            if exceptions:
+                                span_context["exceptions"] = exceptions[:3]
+                            spans.append(span_context)
             trace["spans"] = spans[:20]  # No events, stack traces, resources or free text.
         except Exception:
             trace["unavailable"] = True

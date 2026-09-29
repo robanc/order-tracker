@@ -36,6 +36,19 @@ def test_missing_order(client):
     assert client.get("/api/orders/missing").status_code == 404
 
 
+def test_express_order_estimated_delivery_crosses_month_end(client):
+    with main.connect() as db:
+        db.execute(
+            "UPDATE orders SET created_at = ? WHERE id = ?",
+            ("2026-01-31T23:30:00+00:00", "express-1002"),
+        )
+
+    response = client.get("/api/orders/express-1002")
+
+    assert response.status_code == 200
+    assert response.json()["estimated_delivery"] == "2026-02-02"
+
+
 @pytest.mark.parametrize("order_id,status_code", [("standard-1001", 200), ("missing", 404)])
 def test_lookup_telemetry(client, monkeypatch, order_id, status_code):
     from unittest.mock import Mock

@@ -45,14 +45,19 @@ Only explicit known-safe label/annotation values are retained. Unknown fields
 and free text are dropped, even under familiar keys. To support another alert,
 review and extend `context.py`'s allowlist. Non-test alerts collect the preceding
 five minutes of lookup counter increases, up to 20 5xx log records' technical
-metadata, and at most three linked Tempo traces with route/status details.
+metadata, and at most three linked Tempo traces with route/status details. From
+trace exception events it retains only allowlisted exception class names and
+three exact calendar diagnostics (`day is out of range for month`, `month must
+be in 1..12`, and `year out of range`).
 Backend URLs and queries are fixed; incoming URLs are never fetched. Missing
 telemetry is recorded as unavailable. Test-marked alerts skip telemetry entirely.
 
 No raw alert payload, credentials, authorization/cookie headers, log body,
-request/response body, order ID, customer contents, exception message/stack,
-or arbitrary resource fields are stored. Backend responses are bounded and
-only processed in memory. Artifacts under `incidents/<id>/` contain sanitized
+request/response body, order ID, customer contents, exception stack trace,
+unmatched exception messages, or arbitrary resource fields are stored. The only
+source read is `app/main.py`: top-level `as_dict`, `order_detail`, and `get_order`
+functions plus a `datetime` import containing only `datetime`, `timedelta`, or
+`timezone`. Backend responses are bounded and only processed in memory. Artifacts under `incidents/<id>/` contain sanitized
 context, execution state, and the agent's textual answer; they are git-ignored.
 Raw CLI stdout/stderr diagnostics are not saved. The successful JSON result's
 text is captured without rewriting its final line.
@@ -69,5 +74,20 @@ error instead of potentially sensitive CLI diagnostics.
 Run `uv run --frozen pytest -q`. Tests mock the agent and telemetry; they never
 launch a real agent. The live homework test is the only real invocation.
 
-**Grafana is not connected.** No contact point, webhook, responder notification
-policy, or express-order incident is configured or triggered in Question 5.
+Question 5 uses a manually delivered synthetic notification. Question 6 adds
+`observability/grafana/provisioning/alerting/incident-responder.json`: a webhook
+contact point at `http://host.docker.internal:8001/alerts` and a notification
+policy matching only the Order Tracker `Order lookup HTTP 5xx` alert. The
+existing default email route is preserved for unmatched alerts. Initial group
+wait is 10 seconds, group interval 30 seconds, repeat interval 4 hours.
+
+Start the host responder before restarting Grafana to load provisioning:
+`docker compose restart grafana`. Confirm host reachability from the container
+using the responder health endpoint. Grafana delivers actual firing/resolved
+notifications; repeated deliveries reuse the stored incident and resolved
+notifications do not launch the agent. No manual POST substitutes for Grafana.
+
+The agent still has no filesystem or execution tools. It receives only the
+allowlisted source snippets and can suggest a unified diff as text; the responder
+does not apply patches. Review the captured proposal and approve any application
+remediation separately.
