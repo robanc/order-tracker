@@ -6,6 +6,7 @@ from app import main
 
 @pytest.fixture
 def client(tmp_path, monkeypatch):
+    monkeypatch.delenv("OTEL_EXPORTER_OTLP_ENDPOINT", raising=False)
     monkeypatch.setattr(main, "DB_PATH", tmp_path / "orders.db")
     with TestClient(main.app) as test_client:
         yield test_client

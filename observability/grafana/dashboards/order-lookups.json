@@ -1,0 +1,140 @@
+{
+  "uid": "order-lookups",
+  "title": "Order Tracker — Order Lookups",
+  "schemaVersion": 40,
+  "version": 1,
+  "editable": false,
+  "tags": [
+    "order-tracker",
+    "homework-4"
+  ],
+  "timezone": "browser",
+  "refresh": "5s",
+  "time": {
+    "from": "now-30m",
+    "to": "now"
+  },
+  "panels": [
+    {
+      "id": 1,
+      "type": "stat",
+      "title": "Lookup requests (current counters)",
+      "gridPos": {
+        "x": 0,
+        "y": 0,
+        "w": 12,
+        "h": 5
+      },
+      "targets": [
+        {
+          "expr": "sum(order_lookup_requests_total{service_name=\"order-tracker\",http_route=\"/api/orders/{order_id}\"}) or vector(0)",
+          "instant": true,
+          "refId": "A"
+        }
+      ],
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "description": "Cumulative exported counters, reset when the application restarts. HTTP errors include both client errors (4xx) and server errors (5xx).",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 2,
+      "type": "stat",
+      "title": "HTTP errors — 4xx and 5xx (current counters)",
+      "gridPos": {
+        "x": 12,
+        "y": 0,
+        "w": 12,
+        "h": 5
+      },
+      "targets": [
+        {
+          "expr": "sum(order_lookup_requests_total{service_name=\"order-tracker\",http_route=\"/api/orders/{order_id}\",http_response_status_code=~\"4..|5..\"}) or vector(0)",
+          "instant": true,
+          "refId": "A"
+        }
+      ],
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "description": "Cumulative exported counters, reset when the application restarts. HTTP errors include both client errors (4xx) and server errors (5xx).",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 3,
+      "type": "timeseries",
+      "title": "Lookup request counts by HTTP status",
+      "gridPos": {
+        "x": 0,
+        "y": 5,
+        "w": 24,
+        "h": 8
+      },
+      "targets": [
+        {
+          "expr": "sum by (http_response_status_code) (order_lookup_requests_total{service_name=\"order-tracker\",http_route=\"/api/orders/{order_id}\"})",
+          "legendFormat": "HTTP {{http_response_status_code}}",
+          "refId": "A"
+        }
+      ],
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "description": "Cumulative exported counters, reset when the application restarts. HTTP errors include both client errors (4xx) and server errors (5xx).",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 4,
+      "type": "logs",
+      "title": "Structured order lookup logs",
+      "datasource": {
+        "type": "loki",
+        "uid": "loki"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 13,
+        "w": 24,
+        "h": 8
+      },
+      "targets": [
+        {
+          "expr": "{service_name=\"order-tracker\"} | http_route=\"/api/orders/{order_id}\"",
+          "refId": "A"
+        }
+      ],
+      "options": {
+        "showTime": true,
+        "showLabels": false,
+        "wrapLogMessage": true,
+        "sortOrder": "Descending"
+      },
+      "description": "Expand a log to inspect order_id, http_response_status_code and trace_id.",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      }
+    }
+  ]
+}
