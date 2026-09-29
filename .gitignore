@@ -4,3 +4,5 @@ __pycache__/
 *.pyc
 data/
 .env
+incident-response/incidents/
+incident-response/runtime/
