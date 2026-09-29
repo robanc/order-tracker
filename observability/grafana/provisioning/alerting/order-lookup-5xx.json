@@ -1,0 +1,93 @@
+{
+  "apiVersion": 1,
+  "groups": [
+    {
+      "orgId": 1,
+      "name": "order-lookup-errors",
+      "folder": "Order Tracker",
+      "interval": "10s",
+      "rules": [
+        {
+          "uid": "order-lookup-5xx",
+          "title": "Order lookup HTTP 5xx",
+          "condition": "B",
+          "data": [
+            {
+              "refId": "A",
+              "relativeTimeRange": {
+                "from": 300,
+                "to": 0
+              },
+              "datasourceUid": "prometheus",
+              "model": {
+                "refId": "A",
+                "datasource": {
+                  "type": "prometheus",
+                  "uid": "prometheus"
+                },
+                "expr": "sum(\n  (increase(order_lookup_requests_total{service_name=\"order-tracker\",http_route=\"/api/orders/{order_id}\",http_request_method=\"GET\",http_response_status_code=~\"5..\"}[5m]) > 0)\n  or\n  (order_lookup_requests_total{service_name=\"order-tracker\",http_route=\"/api/orders/{order_id}\",http_request_method=\"GET\",http_response_status_code=~\"5..\"} unless order_lookup_requests_total{service_name=\"order-tracker\",http_route=\"/api/orders/{order_id}\",http_request_method=\"GET\",http_response_status_code=~\"5..\"} offset 5m)\n) or vector(0)",
+                "instant": true,
+                "range": false,
+                "intervalMs": 1000,
+                "maxDataPoints": 43200
+              }
+            },
+            {
+              "refId": "B",
+              "relativeTimeRange": {
+                "from": 0,
+                "to": 0
+              },
+              "datasourceUid": "__expr__",
+              "model": {
+                "refId": "B",
+                "type": "threshold",
+                "expression": "A",
+                "conditions": [
+                  {
+                    "evaluator": {
+                      "params": [
+                        0
+                      ],
+                      "type": "gt"
+                    },
+                    "operator": {
+                      "type": "and"
+                    },
+                    "query": {
+                      "params": [
+                        "B"
+                      ]
+                    },
+                    "reducer": {
+                      "params": [],
+                      "type": "last"
+                    },
+                    "type": "query"
+                  }
+                ]
+              }
+            }
+          ],
+          "noDataState": "OK",
+          "execErrState": "Error",
+          "for": "0s",
+          "annotations": {
+            "summary": "HTTP 5xx detected for GET /api/orders/{order_id}",
+            "description": "A 5xx counter increased or first appeared for the order lookup endpoint within the last 5 minutes. Evaluated every 10 seconds; no pending period.",
+            "route": "GET /api/orders/{order_id}",
+            "evaluation_window": "5 minutes",
+            "dashboard_url": "http://localhost:3001/d/order-lookups",
+            "__dashboardUid__": "order-lookups",
+            "__panelId__": "3"
+          },
+          "labels": {
+            "service": "order-tracker",
+            "severity": "warning"
+          },
+          "isPaused": false
+        }
+      ]
+    }
+  ]
+}
